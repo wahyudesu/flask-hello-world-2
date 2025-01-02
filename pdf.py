@@ -1,17 +1,22 @@
 import os
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import PyPDF2
-from supabase import create_client
+from supabase import create_client, Client
 from dotenv import load_dotenv
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions
+from docling.document_converter import DocumentConverter, PdfFormatOption
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv('SUPABASE_URL')
-SUPABASE_KEY = os.getenv('SUPABASE_KEY')
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-BUCKET_NAME = "Pdf document homework"
+# Ambil nilai URL dan Key dari file .env
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_KEY")
 
+# Membuat client Supabase
+supabase: Client = create_client(url, key)
+
+# Flask setup
 app = Flask(__name__)
 CORS(app)
 
@@ -19,36 +24,44 @@ CORS(app)
 def home():
     return 'Berhasil cuy!'
 
+#Function pdf parse
+def convert_pdf(file):
+    # Inisialisasi opsi pipeline untuk OCR dan struktur tabel
+    pipeline_options = PdfPipelineOptions()
+    pipeline_options.do_ocr = False
+    pipeline_options.do_table_structure = True
+    pipeline_options.table_structure_options.do_cell_matching = True
+
+    doc_converter = DocumentConverter(
+        format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)}
+    )
+
+    conv_result = doc_converter.convert(file)
+    
+    # export
+    result_md = conv_result.document.export_to_markdown()
+    return result_md
+#Function embeddings
 @app.route('/upload', methods=['POST'])
 def upload_file():
-    # Cek apakah file ada
-    if 'file' not in request.files:
-        return jsonify({'error': 'Tidak ada file'}), 400
-
-    pdf_file = request.files['file']
-    
-    # Validasi file PDF
-    if not pdf_file.filename.endswith('.pdf'):
-        return jsonify({'error': 'File harus PDF'}), 400
+    data = request.get_json()  # Mendapatkan data JSON dari request
+    name_student = data.get('nameStudent')  # Mengambil nilai 'nameStudent'
+    file_paths = data.get('filePaths', [])  # Mengambil nilai 'filePaths' atau default []
 
     try:
-        # Ekstrak teks dari PDF
-        reader = PyPDF2.PdfReader(pdf_file)
-        text_content = "\n".join(page.extract_text() for page in reader.pages)
-
-        # Upload ke Supabase
-        file_name = pdf_file.filename
-        file_data = pdf_file.read()
-        supabase.storage.from_(BUCKET_NAME).upload(file_name, file_data)
-        file_url = supabase.storage.from_(BUCKET_NAME).get_public_url(file_name)
-        print(file_url)
-
-        return jsonify({
-            'file_url': file_url
-        })
-    
+        # file_parse = convert_pdf(file_paths)
+        
+        # Return a successful response
+        for file_path in file_paths:
+            supabase.table('documents').insert({
+                'nameStudent': name_student,
+                'documentUrl': file_path,
+                # 'embeddings': file_parse
+            }).execute()
+        
     except Exception as e:
-        return jsonify({'error': str(e)}), 500
+        # Return any error that occurred during the process
+        return jsonify({'error': f'Terjadi kesalahan saat memproses file: {str(e)}'}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)

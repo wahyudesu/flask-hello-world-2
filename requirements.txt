@@ -5,3 +5,4 @@ reportlab
 supabase
 pikepdf
 python-dotenv
+docling
